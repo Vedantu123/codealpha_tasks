@@ -1,0 +1,451 @@
+//Task 2 { Stock Trading Platform}
+import java.io.*;
+import java.text.DecimalFormat;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+public class StockTradingApp {
+
+    private static final String PORTFOLIO_FILE = "portfolio.csv";
+    private static final String TRANSACTIONS_FILE = "transactions.csv";
+
+    private static final Scanner scanner = new Scanner(System.in);
+    private static final DecimalFormat moneyFmt = new DecimalFormat("#,##0.00");
+    private static Market market;
+    private static Portfolio portfolio;
+
+    public static void main(String[] args) {
+        System.out.println("=== Welcome to Mini Stock Trading Platform ===");
+        market = Market.defaultMarket();       // load initial market
+        portfolio = Portfolio.loadFromFile(PORTFOLIO_FILE, TRANSACTIONS_FILE, market);
+        mainMenuLoop();
+    }
+
+    private static void mainMenuLoop() {
+        while (true) {
+            System.out.println("\n--- Main Menu ---");
+            System.out.println("1. View Market");
+            System.out.println("2. Simulate Market Tick (random price changes)");
+            System.out.println("3. Buy Stock");
+            System.out.println("4. Sell Stock");
+            System.out.println("5. View Portfolio Summary");
+            System.out.println("6. View Transaction History");
+            System.out.println("7. Save Portfolio to Disk");
+            System.out.println("8. Exit (auto-save)");
+            System.out.print("Choose: ");
+
+            int choice = readInt();
+            switch (choice) {
+                case 1 -> market.displayMarket();
+                case 2 -> {
+                    market.simulatePriceChange();
+                    System.out.println("Market tick simulated.");
+                }
+                case 3 -> buyFlow();
+                case 4 -> sellFlow();
+                case 5 -> portfolio.displaySummary(market);
+                case 6 -> portfolio.printTransactions();
+                case 7 -> {
+                    portfolio.saveToFile(PORTFOLIO_FILE, TRANSACTIONS_FILE);
+                    System.out.println("Saved.");
+                }
+                case 8 -> {
+                    System.out.println("Saving and exiting...");
+                    portfolio.saveToFile(PORTFOLIO_FILE, TRANSACTIONS_FILE);
+                    return;
+                }
+                default -> System.out.println("Invalid choice.");
+            }
+        }
+    }
+
+    private static void buyFlow() {
+        market.displayMarket();
+        System.out.print("Enter stock symbol to BUY: ");
+        String sym = scanner.next().toUpperCase();
+        Stock s = market.getStock(sym);
+        if (s == null) {
+            System.out.println("Symbol not found.");
+            return;
+        }
+        System.out.println("Selected: " + s);
+        System.out.print("Enter quantity to buy: ");
+        int qty = readInt();
+        if (qty <= 0) {
+            System.out.println("Quantity must be positive.");
+            return;
+        }
+        double total = qty * s.getPrice();
+        System.out.println("Total cost: ₹" + moneyFmt.format(total));
+        if (portfolio.getCash() < total) {
+            System.out.println("Insufficient cash. Available: ₹" + moneyFmt.format(portfolio.getCash()));
+            return;
+        }
+        System.out.print("Confirm buy? (y/n): ");
+        String ans = scanner.next();
+        if (ans.equalsIgnoreCase("y")) {
+            portfolio.buy(s, qty);
+            System.out.println("Bought " + qty + " of " + sym + " at ₹" + moneyFmt.format(s.getPrice()));
+        } else {
+            System.out.println("Buy canceled.");
+        }
+    }
+
+    private static void sellFlow() {
+        if (portfolio.getHoldings().isEmpty()) {
+            System.out.println("No holdings to sell.");
+            return;
+        }
+        portfolio.displayHoldings();
+        System.out.print("Enter stock symbol to SELL: ");
+        String sym = scanner.next().toUpperCase();
+        Holding h = portfolio.getHolding(sym);
+        if (h == null) {
+            System.out.println("You don't hold this stock.");
+            return;
+        }
+        System.out.println("You hold: " + h.quantity + " shares; avg buy price: ₹" + moneyFmt.format(h.avgBuyPrice));
+        System.out.print("Enter quantity to sell: ");
+        int qty = readInt();
+        if (qty <= 0 || qty > h.quantity) {
+            System.out.println("Invalid quantity.");
+            return;
+        }
+        Stock s = market.getStock(sym);
+        if (s == null) {
+            System.out.println("Market no longer has this stock.");
+            return;
+        }
+        double proceeds = qty * s.getPrice();
+        System.out.println("Proceeds: ₹" + moneyFmt.format(proceeds));
+        System.out.print("Confirm sell? (y/n): ");
+        String ans = scanner.next();
+        if (ans.equalsIgnoreCase("y")) {
+            portfolio.sell(s, qty);
+            System.out.println("Sold " + qty + " of " + sym + " at ₹" + moneyFmt.format(s.getPrice()));
+        } else {
+            System.out.println("Sell canceled.");
+        }
+    }
+
+    private static int readInt() {
+        while (!scanner.hasNextInt()) {
+            System.out.print("Enter a valid integer: ");
+            scanner.next();
+        }
+        int v = scanner.nextInt();
+        return v;
+    }
+}
+
+
+
+/** Represents an individual stock in the market */
+class Stock {
+    private final String symbol;
+    private final String name;
+    private double price; // current price
+
+    Stock(String symbol, String name, double price) {
+        this.symbol = symbol.toUpperCase();
+        this.name = name;
+        this.price = price;
+    }
+
+    String getSymbol() { return symbol; }
+    String getName() { return name; }
+    double getPrice() { return price; }
+    void setPrice(double newPrice) { price = newPrice; }
+
+    @Override
+    public String toString() {
+        return symbol + " (" + name + ") : ₹" + StockTradingApp.moneyFmt.format(price);
+    }
+}
+
+class Holding {
+    final Stock stock;
+    int quantity;
+    double avgBuyPrice; 
+
+    Holding(Stock stock, int quantity, double avgBuyPrice) {
+        this.stock = stock;
+        this.quantity = quantity;
+        this.avgBuyPrice = avgBuyPrice;
+    }
+}
+
+class Transaction {
+    final String id;
+    final String type;
+    final String symbol;
+    final int qty;
+    final double price; 
+    final String timestamp;
+
+    Transaction(String id, String type, String symbol, int qty, double price, String timestamp) {
+        this.id = id;
+        this.type = type;
+        this.symbol = symbol;
+        this.qty = qty;
+        this.price = price;
+        this.timestamp = timestamp;
+    }
+
+    @Override
+    public String toString() {
+        return String.join(" | ",
+                id,
+                timestamp,
+                type,
+                symbol,
+                "qty:" + qty,
+                "price:₹" + StockTradingApp.moneyFmt.format(price)
+        );
+    }
+
+    // CSV line
+    String toCSV() {
+        return String.join(",", id, timestamp, type, symbol, String.valueOf(qty), String.valueOf(price));
+    }
+
+    static Transaction fromCSV(String line) {
+        String[] parts = line.split(",");
+        if (parts.length < 6) return null;
+        return new Transaction(parts[0], parts[2], parts[3], Integer.parseInt(parts[4]), Double.parseDouble(parts[5]), parts[1]);
+    }
+}
+
+/** Portfolio holds cash, holdings and transactions */
+class Portfolio {
+    private double cash;
+    private final Map<String, Holding> holdings = new HashMap<>();
+    private final List<Transaction> transactions = new ArrayList<>();
+    private final Market market;
+
+    private Portfolio(double cash, Market market) {
+        this.cash = cash;
+        this.market = market;
+    }
+
+    double getCash() { return cash; }
+    Map<String, Holding> getHoldings() { return holdings; }
+
+    void buy(Stock stock, int qty) {
+        double cost = qty * stock.getPrice();
+        cash -= cost;
+        Holding h = holdings.get(stock.getSymbol());
+        if (h == null) {
+            holdings.put(stock.getSymbol(), new Holding(stock, qty, stock.getPrice()));
+        } else {
+            // update weighted avg
+            double totalCost = h.avgBuyPrice * h.quantity + cost;
+            h.quantity += qty;
+            h.avgBuyPrice = totalCost / h.quantity;
+        }
+        Transaction t = new Transaction(UUID.randomUUID().toString(), "BUY", stock.getSymbol(), qty, stock.getPrice(), now());
+        transactions.add(t);
+    }
+
+    void sell(Stock stock, int qty) {
+        Holding h = holdings.get(stock.getSymbol());
+        if (h == null || h.quantity < qty) throw new IllegalArgumentException("Insufficient shares");
+        double proceeds = qty * stock.getPrice();
+        cash += proceeds;
+        h.quantity -= qty;
+        if (h.quantity == 0) holdings.remove(stock.getSymbol());
+        Transaction t = new Transaction(UUID.randomUUID().toString(), "SELL", stock.getSymbol(), qty, stock.getPrice(), now());
+        transactions.add(t);
+    }
+
+    Holding getHolding(String symbol) {
+        return holdings.get(symbol.toUpperCase());
+    }
+
+    void displayHoldings() {
+        if (holdings.isEmpty()) {
+            System.out.println("No holdings.");
+            return;
+        }
+        System.out.println("\n--- Current Holdings ---");
+        System.out.printf("%-8s %-10s %-12s %-12s %-12s%n", "Symbol", "Qty", "AvgBuy", "CurPrice", "Unrealized P/L");
+        for (Holding h : holdings.values()) {
+            double cur = h.stock.getPrice();
+            double pl = (cur - h.avgBuyPrice) * h.quantity;
+            System.out.printf("%-8s %-10d ₹%-10s ₹%-10s ₹%-10s%n",
+                    h.stock.getSymbol(),
+                    h.quantity,
+                    StockTradingApp.moneyFmt.format(h.avgBuyPrice),
+                    StockTradingApp.moneyFmt.format(cur),
+                    StockTradingApp.moneyFmt.format(pl));
+        }
+    }
+
+    void displaySummary(Market market) {
+        System.out.println("\n--- Portfolio Summary ---");
+        System.out.println("Cash: ₹" + StockTradingApp.moneyFmt.format(cash));
+        double holdingsValue = 0;
+        double costBasis = 0;
+        for (Holding h : holdings.values()) {
+            holdingsValue += h.quantity * h.stock.getPrice();
+            costBasis += h.quantity * h.avgBuyPrice;
+        }
+        System.out.println("Holdings Market Value: ₹" + StockTradingApp.moneyFmt.format(holdingsValue));
+        System.out.println("Total Portfolio Value: ₹" + StockTradingApp.moneyFmt.format(cash + holdingsValue));
+        double unrealizedPL = holdingsValue - costBasis;
+        System.out.println("Unrealized P/L: ₹" + StockTradingApp.moneyFmt.format(unrealizedPL));
+        System.out.println("Number of holdings: " + holdings.size());
+        displayHoldings();
+    }
+
+    void printTransactions() {
+        if (transactions.isEmpty()) {
+            System.out.println("No transactions yet.");
+            return;
+        }
+        System.out.println("\n--- Transactions ---");
+        for (Transaction t : transactions) {
+            System.out.println(t);
+        }
+    }
+
+    // Persistence
+    void saveToFile(String portfolioFile, String transactionsFile) {
+        // portfolio CSV format: CASH
+        try (PrintWriter pw = new PrintWriter(new FileWriter(portfolioFile))) {
+            pw.println(cash);
+            // holdings per line: symbol,qty,avgBuyPrice
+            for (Holding h : holdings.values()) {
+                pw.println(String.join(",", h.stock.getSymbol(), String.valueOf(h.quantity), String.valueOf(h.avgBuyPrice)));
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to save portfolio: " + e.getMessage());
+        }
+
+        try (PrintWriter pw = new PrintWriter(new FileWriter(transactionsFile))) {
+            for (Transaction t : transactions) {
+                pw.println(t.toCSV());
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to save transactions: " + e.getMessage());
+        }
+    }
+
+    static Portfolio loadFromFile(String portfolioFile, String transactionsFile, Market market) {
+        Portfolio p = new Portfolio(100000.0, market); // default cash ₹100,000
+        // load portfolio
+        File pf = new File(portfolioFile);
+        if (pf.exists()) {
+            try (BufferedReader br = new BufferedReader(new FileReader(pf))) {
+                String line = br.readLine();
+                if (line != null && !line.isBlank()) {
+                    p.cash = Double.parseDouble(line.trim());
+                }
+                while ((line = br.readLine()) != null) {
+                    if (line.isBlank()) continue;
+                    String[] parts = line.split(",");
+                    if (parts.length < 3) continue;
+                    String sym = parts[0];
+                    int qty = Integer.parseInt(parts[1]);
+                    double avg = Double.parseDouble(parts[2]);
+                    Stock s = market.getStock(sym);
+                    if (s != null) {
+                        p.holdings.put(sym, new Holding(s, qty, avg));
+                    } else {
+                        // If stock not in current market, create a placeholder with price = avg
+                        Stock placeholder = new Stock(sym, sym + " (delisted?)", avg);
+                        p.holdings.put(sym, new Holding(placeholder, qty, avg));
+                    }
+                }
+                System.out.println("Loaded portfolio from " + portfolioFile);
+            } catch (Exception e) {
+                System.err.println("Error loading portfolio: " + e.getMessage());
+            }
+        } else {
+            System.out.println("No existing portfolio found. Starting fresh with ₹" + StockTradingApp.moneyFmt.format(p.cash));
+        }
+
+        // load transactions
+        File tf = new File(transactionsFile);
+        if (tf.exists()) {
+            try (BufferedReader br = new BufferedReader(new FileReader(tf))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.isBlank()) continue;
+                    Transaction t = Transaction.fromCSV(line);
+                    if (t != null) p.transactions.add(t);
+                }
+                System.out.println("Loaded transactions from " + transactionsFile);
+            } catch (Exception e) {
+                System.err.println("Error loading transactions: " + e.getMessage());
+            }
+        }
+        p.market = market;
+        return p;
+    }
+
+    // Utility
+    private static String now() {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    // Expose now as static to other classes if needed
+    static String nowStatic() {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+}
+
+/** Market holds available stocks and can simulate price changes */
+class Market {
+    private final Map<String, Stock> stocks = new LinkedHashMap<>();
+    private final Random rnd = new Random();
+
+    Market() {}
+
+    void addStock(Stock s) {
+        stocks.put(s.getSymbol(), s);
+    }
+
+    Stock getStock(String symbol) {
+        return stocks.get(symbol.toUpperCase());
+    }
+
+    Collection<Stock> getAllStocks() {
+        return stocks.values();
+    }
+
+    void displayMarket() {
+        System.out.println("\n--- Market Watch ---");
+        System.out.printf("%-8s %-20s %-10s%n", "Symbol", "Name", "Price");
+        for (Stock s : stocks.values()) {
+            System.out.printf("%-8s %-20s ₹%-10s%n", s.getSymbol(), s.getName(), StockTradingApp.moneyFmt.format(s.getPrice()));
+        }
+    }
+
+    /** Randomly change prices by -5%..+5% (simulated tick) */
+    void simulatePriceChange() {
+        for (Stock s : stocks.values()) {
+            double changePct = (rnd.nextDouble() * 10.0) - 5.0; // -5 to +5
+            double newPrice = s.getPrice() * (1.0 + changePct / 100.0);
+            if (newPrice < 0.01) newPrice = 0.01;
+            s.setPrice(roundToTwo(newPrice));
+        }
+    }
+
+    private static double roundToTwo(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    static Market defaultMarket() {
+        Market m = new Market();
+        m.addStock(new Stock("INFY", "Infosys Ltd", 2250.50));
+        m.addStock(new Stock("TCS", "Tata Consultancy", 3100.00));
+        m.addStock(new Stock("RELI", "Reliance Ind.", 2850.75));
+        m.addStock(new Stock("HDFC", "HDFC Bank", 1480.30));
+        m.addStock(new Stock("ICIC", "ICICI Bank", 920.45));
+        m.addStock(new Stock("WIPRO", "Wipro Ltd", 430.20));
+        m.addStock(new Stock("LT", "Larsen & Toubro", 2900.00));
+        m.addStock(new Stock("HCL", "HCL Tech", 140.60));
+        return m;
+    }
+}
